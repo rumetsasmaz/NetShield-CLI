@@ -62,7 +62,7 @@ def check_password_strength():
         score += 1
     else:
         feedback.append(f"{RED}Password Should Be Minimum 8 Character")
-
+    
     if any(char.isupper() for char in password):
         score += 1
     else:
