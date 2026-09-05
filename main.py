@@ -1,4 +1,5 @@
 import random
+import hashlib
 from colorama import Fore, Style, init
 
 # Windows terminalinde renk uyumluluğunu açıyoruz
@@ -97,6 +98,22 @@ def check_password_strength():
         for item in feedback:
             print(f"={item}")
 
+def generate_hash():
+
+
+    text = input(f"{YELLOW}Enter Password To Hash: ")
+
+
+    md5_hash = hashlib.md5(text.encode()).hexdigest()
+
+    sha256_hash = hashlib.sha256(text.encode()).hexdigest()
+
+    print(f"{GREEN}\n[+] Original Text: {text}")
+    print(f"{GREEN}\n[+] MD5: {md5_hash} ")
+    print(f"{GREEN}\n[+] SHA256: {sha256_hash}")
+
+
+
 # Ana Döngü
 print(BANNER)
 
@@ -105,9 +122,10 @@ while True:
     print(f"{GREEN}1. Generate Password{RESET}")
     print(f"{GREEN}2. Check Port{RESET}")
     print(f"{GREEN}3. Check Password Strength{RESET}")
-    print(f"{RED}4. Exit{RESET}")
+    print(f"{GREEN}4. Hash Your Password{RESET}")
+    print(f"{RED}5. Exit{RESET}")
     
-    choice = input(f"\n{YELLOW}Select an option (1-4): {RESET}")
+    choice = input(f"\n{YELLOW}Select an option (1-5): {RESET}")
 
     if choice == "1":
         generate_password()
@@ -116,6 +134,8 @@ while True:
     elif choice == "3":
         check_password_strength()
     elif choice == "4":
+        generate_hash()
+    elif choice == "5":
         print(f"\n{RED}Exiting... Goodbye!{RESET}")
         break
     else:
