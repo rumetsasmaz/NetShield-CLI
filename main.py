@@ -51,6 +51,52 @@ def check_ports():
     except ValueError:
         print(f"{RED}[!] Please enter a valid number.{RESET}\n")
 
+
+
+def check_password_strength():
+    password = input(f"{YELLOW}Enter A Password: ")
+    score = 0
+    feedback = []
+
+    if len(password) >= 9:
+        score += 1
+    else:
+        feedback.append(f"{RED}Password Should Be Minimum 8 Character")
+
+    if any(char.isupper() for char in password):
+        score += 1
+    else:
+        feedback.append(f"{RED}Add Upper Case")
+
+    if any(char.islower() for char in password):
+        score += 1 
+    else:
+        feedback.append(f"{RED}Add Lower Case")
+
+    if any(char.isdigit() for char in password):
+        score += 1
+    else:
+        feedback.append(f"{RED}Add Digit")
+
+    if any(char.isalnum() for char in password):
+        score += 1
+    else:
+        feedback.append(f"{RED}Add Symbol")
+
+    print(f"\nScore: {score}/5")
+
+    if score == 5:
+        print(f"{GREEN}Status: Strong Password")
+    elif score >= 3:
+        print(f"{YELLOW}Status: Medium Password")
+    else:
+        print(f"{RED}Status: Weak Password")
+
+    if feedback:
+        print("\nSuggestion To Improve: ")
+        for item in feedback:
+            print(f"={item}")
+
 # Ana Döngü
 print(BANNER)
 
@@ -58,15 +104,18 @@ while True:
     print(f"{CYAN}--- NetShield-CLI ---{RESET}")
     print(f"{GREEN}1. Generate Password{RESET}")
     print(f"{GREEN}2. Check Port{RESET}")
-    print(f"{RED}3. Exit{RESET}")
+    print(f"{GREEN}3. Check Password Strength{RESET}")
+    print(f"{RED}4. Exit{RESET}")
     
-    choice = input(f"\n{YELLOW}Select an option (1-3): {RESET}")
+    choice = input(f"\n{YELLOW}Select an option (1-4): {RESET}")
 
     if choice == "1":
         generate_password()
     elif choice == "2":
         check_ports()
     elif choice == "3":
+        check_password_strength()
+    elif choice == "4":
         print(f"\n{RED}Exiting... Goodbye!{RESET}")
         break
     else:
