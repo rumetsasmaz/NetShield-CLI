@@ -6,6 +6,10 @@ from colorama import Fore, Style, init
 init(autoreset=True)
 
 # Renk tanımlamaları
+BLACK = Fore.BLACK
+WHITE = Fore.WHITE
+MAGENTA = Fore.MAGENTA
+BLUE = Fore.BLUE
 GREEN = Fore.GREEN
 RED = Fore.RED
 CYAN = Fore.CYAN
@@ -98,8 +102,8 @@ def check_password_strength():
         for item in feedback:
             print(f"={item}")
 
-def generate_hash():
 
+def generate_hash():
 
     text = input(f"{YELLOW}Enter Password To Hash: ")
 
@@ -113,6 +117,28 @@ def generate_hash():
     print(f"{GREEN}\n[+] SHA256: {sha256_hash}")
 
 
+def hash_cracker():
+
+    wordlist = ["123456", "password", "admin", "helloworld", "letmein", "qwerty" , "fuckoff"]
+
+    target_hash = input(f"{YELLOW}Enter A Target Hash: ").strip().lower()
+    found = False
+
+    print(f"{RED}\n[+] Starting The Attack...")
+
+    for word in wordlist:
+
+        word_md5 = hashlib.md5(word.encode()).hexdigest()
+        word_sha256 = hashlib.sha256(word.encode()).hexdigest()
+
+        if target_hash == word_md5 or target_hash == word_sha256:
+            print(f"{GREEN}\n[SUCCESS] Hash Cracked! The Password Is: {word}")
+            found = True
+            break
+
+    if not found:
+        print(f"\n[FAILED]{RED} Password Couldnt Found In The Wordlist")
+
 
 # Ana Döngü
 print(BANNER)
@@ -123,9 +149,10 @@ while True:
     print(f"{GREEN}2. Check Port{RESET}")
     print(f"{GREEN}3. Check Password Strength{RESET}")
     print(f"{GREEN}4. Hash Your Password{RESET}")
-    print(f"{RED}5. Exit{RESET}")
+    print(f"{GREEN}5. Crack Hash{RESET}")
+    print(f"{RED}6. Exit{RESET}")
     
-    choice = input(f"\n{YELLOW}Select an option (1-5): {RESET}")
+    choice = input(f"\n{YELLOW}Select an option (1-6): {RESET}")
 
     if choice == "1":
         generate_password()
@@ -136,6 +163,8 @@ while True:
     elif choice == "4":
         generate_hash()
     elif choice == "5":
+        hash_cracker()
+    elif choice == "6":
         print(f"\n{RED}Exiting... Goodbye!{RESET}")
         break
     else:
