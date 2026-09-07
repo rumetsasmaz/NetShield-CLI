@@ -119,26 +119,36 @@ def generate_hash():
 
 def hash_cracker():
 
-    wordlist = ["123456", "password", "admin", "helloworld", "letmein", "qwerty" , "fuckoff"]
+    print(f"\n{Fore.CYAN}--- Hash Cracker (Dictionary Attack) ---{Style.RESET_ALL}")
+    target_hash = input(f"{Fore.YELLOW}Enter Target Hash (MD5 / SHA-256): {Style.RESET_ALL}").strip().lower()
+    
+    if not target_hash:
+        print(f"{Fore.RED}[-] Hash input cannot be empty.{Style.RESET_ALL}")
+        return
 
-    target_hash = input(f"{YELLOW}Enter A Target Hash: ").strip().lower()
+    print(f"{Fore.BLUE}[+] Starting attack using passwords.txt...{Style.RESET_ALL}")
     found = False
 
-    print(f"{RED}\n[+] Starting The Attack...")
+    try:
+        with open("passwords.txt", "r", encoding="utf-8") as file:
+            for line in file:
+                word = line.strip()
+                if not word:
+                    continue
+                
+                word_md5 = hashlib.md5(word.encode()).hexdigest()
+                word_sha256 = hashlib.sha256(word.encode()).hexdigest()
+                
+                if target_hash == word_md5 or target_hash == word_sha256:
+                    print(f"\n{Fore.GREEN}[SUCCESS] Hash Cracked! Password: {word}{Style.RESET_ALL}\n")
+                    found = True
+                    break
 
-    for word in wordlist:
+        if not found:
+            print(f"\n{Fore.RED}[FAILED] Password not found in passwords.txt.{Style.RESET_ALL}\n")
 
-        word_md5 = hashlib.md5(word.encode()).hexdigest()
-        word_sha256 = hashlib.sha256(word.encode()).hexdigest()
-
-        if target_hash == word_md5 or target_hash == word_sha256:
-            print(f"{GREEN}\n[SUCCESS] Hash Cracked! The Password Is: {word}")
-            found = True
-            break
-
-    if not found:
-        print(f"\n[FAILED]{RED} Password Couldnt Found In The Wordlist")
-
+    except FileNotFoundError:
+        print(f"\n{Fore.RED}[ERROR] 'passwords.txt' file not found in directory!{Style.RESET_ALL}\n")
 
 # Ana Döngü
 print(BANNER)
@@ -149,7 +159,7 @@ while True:
     print(f"{GREEN}2. Check Port{RESET}")
     print(f"{GREEN}3. Check Password Strength{RESET}")
     print(f"{GREEN}4. Hash Your Password{RESET}")
-    print(f"{GREEN}5. Crack Hash{RESET}")
+    print(f"{GREEN}5. Hash Cracker{RESET}")
     print(f"{RED}6. Exit{RESET}")
     
     choice = input(f"\n{YELLOW}Select an option (1-6): {RESET}")
