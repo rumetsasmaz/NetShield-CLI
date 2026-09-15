@@ -1,4 +1,6 @@
+from port_scanner import run_scanner_ui
 import random
+import socket
 import hashlib
 from colorama import Fore, Style, init
 
@@ -25,6 +27,7 @@ BANNER = f"""{CYAN}
 | |\  || |___  | | /\__/ / | | | _| |_| |___| |___| |/ /   | \__/\ |_____| |_ 
 \_| \_/\____/  \_/ \____/\_| |_/\___/\____/\_____/___/     \____/\_____/\___/
 {RESET}"""
+
 
 def generate_password():
     upper_case = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -55,7 +58,6 @@ def check_ports():
             print(f"{RED}[-] Port {target_port}: Not registered in the database or non-standard service.{RESET}\n")
     except ValueError:
         print(f"{RED}[!] Please enter a valid number.{RESET}\n")
-
 
 
 def check_password_strength():
@@ -104,12 +106,9 @@ def check_password_strength():
 
 
 def generate_hash():
-
     text = input(f"{YELLOW}Enter Password To Hash: ")
 
-
     md5_hash = hashlib.md5(text.encode()).hexdigest()
-
     sha256_hash = hashlib.sha256(text.encode()).hexdigest()
 
     print(f"{GREEN}\n[+] Original Text: {text}")
@@ -118,7 +117,6 @@ def generate_hash():
 
 
 def hash_cracker():
-
     print(f"\n{Fore.CYAN}--- Hash Cracker (Dictionary Attack) ---{Style.RESET_ALL}")
     target_hash = input(f"{Fore.YELLOW}Enter Target Hash (MD5 / SHA-256): {Style.RESET_ALL}").strip().lower()
     
@@ -150,22 +148,24 @@ def hash_cracker():
     except FileNotFoundError:
         print(f"\n{Fore.RED}[ERROR] 'passwords.txt' file not found in directory!{Style.RESET_ALL}\n")
 
-# Ana Döngü
+
+# Main Loop
 print(BANNER)
 
 while True:
     print(f"{CYAN}--- NetShield-CLI ---{RESET}")
-    print(f"{GREEN}1. Generate Password{RESET}")
-    print(f"{GREEN}2. Check Port{RESET}")
+    print(f"{GREEN}1. Port & Service Scanner (Banner Grabbing){RESET}")
+    print(f"{GREEN}2. Check Port Database{RESET}")
     print(f"{GREEN}3. Check Password Strength{RESET}")
     print(f"{GREEN}4. Hash Your Password{RESET}")
     print(f"{GREEN}5. Hash Cracker{RESET}")
-    print(f"{RED}6. Exit{RESET}")
+    print(f"{GREEN}6. Generate Password{RESET}")
+    print(f"{RED}7. Exit{RESET}")
     
-    choice = input(f"\n{YELLOW}Select an option (1-6): {RESET}")
+    choice = input(f"\n{YELLOW}Select an option (1-7): {RESET}").strip()
 
     if choice == "1":
-        generate_password()
+        run_scanner_ui()
     elif choice == "2":
         check_ports()
     elif choice == "3":
@@ -175,6 +175,8 @@ while True:
     elif choice == "5":
         hash_cracker()
     elif choice == "6":
+        generate_password()
+    elif choice == "7":
         print(f"\n{RED}Exiting... Goodbye!{RESET}")
         break
     else:
