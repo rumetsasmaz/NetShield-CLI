@@ -53,7 +53,7 @@ def scan_port_and_banner(target, start_port, end_port):
                         banner_summary = banner.split('\n')[0]
                         print(f"   └── {YELLOW}[BANNER]: {banner_summary}{RESET}")
                     else:
-                        print(f"   └── {YELLOW}[BANNER]: No response / Silent service.{RESET}")
+                        print(f"   └── {RED}[BANNER]: No response / Silent service.{RESET}")
                 except:
                     print(f"   └── {YELLOW}[BANNER]: Failed to retrieve banner payload.{RESET}")
 
