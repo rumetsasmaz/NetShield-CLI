@@ -12,6 +12,7 @@ A modular, Python-based cybersecurity command-line toolkit for learning, experim
 |---|---|
 | **Port & Service Scanner** | Threaded **TCP and UDP** scan. TCP: `open` / `closed` / `filtered`, banners (passive first, then an HTTP probe), service/version detection, automatic TLS inspection on TLS ports. UDP: real DNS, NTP and SNMP probes; `open` / `closed` (ICMP unreachable) / `open\|filtered`. Port specs: `22,80`, `1-1000`, `top`, `all`. JSON/CSV reports. |
 | **TLS Certificate Check** | Protocol, cipher, subject/issuer, validity, SANs, trust verdict, SHA-256 fingerprint, and findings (expired, expiring < 30 days, self-signed, untrusted, outdated protocol). |
+| **HTTP Security Headers** | Grades a site A+ to F (securityheaders.com style): HTTPS redirect, HSTS, CSP (unsafe-inline/eval, wildcards, nonces), clickjacking, nosniff, Referrer-Policy, Permissions-Policy, cookie flags, version leaks. Every finding comes with a fix hint. One normal GET request, follows up to 5 redirects. |
 | **Host Discovery** | TCP ping of a network (CIDR, max `/24`). |
 | **Packet Sniffer** | Wireshark-style live capture and decoding of IPv4 TCP/UDP/ICMP (DNS queries/answers included). tcpdump-like filters (`tcp and (port 80 or port 443) and not host 10.0.0.1`), duplicate-packet removal, `.pcap` export. Needs Administrator/root. |
 | **Capture Analyzer** | Reads classic `.pcap` files (including Wireshark captures) with no special privileges: filter, statistics, **IPv4 and IPv6**, TCP stream list and **Follow TCP Stream** (reordering, retransmission removal, gap detection). |
@@ -38,6 +39,8 @@ python main.py scan 127.0.0.1 -p 1-1000 --format json -o report.json
 python main.py scan scanme.example -p top --yes        # --yes = I am authorised to scan this target
 python main.py scan 127.0.0.1 --udp                   # DNS/NTP/SNMP probes, UDP top ports
 python main.py tls example.com                          # or host:port
+python main.py headers example.com                      # security header grade + fixes
+python main.py headers https://my.site --fail-under 70  # exit 1 below 70 (for CI)
 python main.py discover 192.168.1.0/24
 python main.py sniff -f "tcp and port 80" -c 50 -w capture.pcap   # needs Administrator/root
 python main.py analyze capture.pcap -f dns                         # no privileges needed
@@ -82,6 +85,7 @@ Adding a tool = write a `BaseModule` subclass in `netshield/modules/` and list i
 * UDP: silence is reported as `open|filtered`, never as open. Unknown UDP ports get a single zero byte as probe, so only services that answer it are detected.
 * TLS certificate details come from Python's private `ssl._ssl._test_decode_cert`; if a future Python removes it, protocol/cipher/fingerprint/trust are still reported.
 * IPv6 is decoded from pcap files and on Linux live capture. **Live IPv6 capture on Windows is not supported.** On Windows the sniffer sees IPv4 only, on one interface, and needs an elevated terminal.
+* The header audit checks one page's response headers. It cannot know intent: a cookie that is deliberately readable by JavaScript (e.g. analytics) is still flagged for missing `HttpOnly`.
 * Follow Stream shows captured data only (no TLS decryption); loss at the end of a stream cannot be detected.
 * Linux live capture (`AF_PACKET`) is implemented but **untested**: the project has only been run on Windows.
 * `tests/data/*.key` are throwaway private keys for local TLS test servers; they protect nothing.
@@ -94,7 +98,9 @@ Adding a tool = write a `BaseModule` subclass in `netshield/modules/` and list i
 - [x] UDP scan (DNS, NTP, SNMP), TLS certificate inspection, IPv6 decoding, Follow TCP Stream
 - [ ] More service probes and signatures (UDP: SSDP, mDNS, NetBIOS)
 - [ ] Live IPv6 capture on Windows (needs Npcap), `.pcapng`, HTTP request/response view
-- [ ] Logging, more security utilities (HTTP header audit, DNS and WHOIS tools)
+- [x] HTTP security header audit
+- [ ] Logging, DNS and WHOIS tools
+- [ ] Coloured output for all CLI commands (auto-off for files/pipes, `--no-color`)
 
 ## 🔒 Ethical use
 

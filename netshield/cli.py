@@ -12,7 +12,7 @@ import sys
 import time
 from datetime import datetime
 
-from netshield import scanning, sniffing, theme
+from netshield import scanning, sniffing, theme, webaudit
 from netshield.modules.hashing import ALGORITHMS, hash_text
 from netshield.modules.password import generate_password, score_password
 from netshield.modules.analyzer import format_stream_list
@@ -71,6 +71,17 @@ def build_parser():
     tls = sub.add_parser("tls", help="inspect a TLS service: protocol, certificate, weaknesses")
     tls.add_argument("target", help="host or host:port (default port 443)")
     tls.add_argument("-t", "--timeout", type=float, default=scanning.DEFAULT_TIMEOUT)
+
+    headers = sub.add_parser("headers", help="grade a website's HTTP security headers")
+    headers.add_argument("url", help="e.g. example.com or https://example.com/login")
+    headers.add_argument("-t", "--timeout", type=float, default=10.0)
+    headers.add_argument("--insecure", action="store_true",
+                         help="skip certificate verification (self-signed hosts you trust)")
+    headers.add_argument("--show-headers", action="store_true", help="also print all response headers")
+    headers.add_argument("--format", choices=("table", "json"), default="table")
+    headers.add_argument("-o", "--output", help="write the report to this file")
+    headers.add_argument("--fail-under", type=int, metavar="SCORE",
+                         help="exit with code 1 if the score is below SCORE (useful in CI)")
 
     ports = sub.add_parser("ports", help="look up a port number or service name")
     ports.add_argument("query")
@@ -198,6 +209,19 @@ def cmd_tls(args):
     return 0
 
 
+def cmd_headers(args):
+    report = webaudit.audit_url(args.url, timeout=args.timeout, insecure=args.insecure)
+    if args.format == "json":
+        text = json.dumps(report.to_dict(), indent=2)
+    else:
+        text = "\n".join(line for _status, line in webaudit.report_lines(report, args.show_headers))
+    code = _write_or_print(text, args.output)
+    if code == 0 and args.fail_under is not None and report.score < args.fail_under:
+        say("error", f"[-] Score {report.score} is below the required {args.fail_under}.")
+        return 1
+    return code
+
+
 def cmd_analyze(args):
     packet_filter = sniffing.compile_filter(args.filter)
     if args.streams or args.follow is not None:
@@ -255,7 +279,7 @@ def cmd_passwd(args):
 
 
 COMMANDS = {"scan": cmd_scan, "discover": cmd_discover, "sniff": cmd_sniff,
-            "analyze": cmd_analyze, "tls": cmd_tls, "ports": cmd_ports, "hash": cmd_hash,
+            "analyze": cmd_analyze, "tls": cmd_tls, "headers": cmd_headers, "ports": cmd_ports, "hash": cmd_hash,
             "passwd": cmd_passwd}
 
 
