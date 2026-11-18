@@ -10,8 +10,18 @@ def ipv4(proto, payload, src="10.0.0.5", dst="93.184.216.34", ttl=64, ident=1):
     return header + payload
 
 
-def tcp(src_port, dst_port, flags, data=b"", seq=100):
-    return struct.pack("!HHLLBBHHH", src_port, dst_port, seq, 0, 5 << 4, flags, 8192, 0, 0) + data
+def tcp(src_port, dst_port, flags, data=b"", seq=100, ack=0):
+    return struct.pack("!HHLLBBHHH", src_port, dst_port, seq, ack, 5 << 4, flags, 8192, 0, 0) + data
+
+
+def ipv6(next_header, payload, src="2001:db8::1", dst="2001:db8::2", hop_limit=64):
+    header = struct.pack("!IHBB", 6 << 28, len(payload), next_header, hop_limit)
+    return (header + socket.inet_pton(socket.AF_INET6, src)
+            + socket.inet_pton(socket.AF_INET6, dst) + payload)
+
+
+def icmpv6(icmp_type, body=b"\x00" * 4):
+    return struct.pack("!BBH", icmp_type, 0, 0) + body
 
 
 def udp(src_port, dst_port, data=b""):

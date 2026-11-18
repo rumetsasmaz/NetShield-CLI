@@ -3,7 +3,7 @@ import struct
 import pytest
 
 from netshield import sniffing as sn
-from tests.packets import dns_query, dns_response, icmp_echo, ipv4, tcp, udp
+from tests.packets import dns_query, dns_response, icmp_echo, ipv4, ipv6, tcp, udp
 
 
 def http_get():
@@ -116,6 +116,20 @@ def test_deduplicator():
         timestamp=1.020)
     assert not dedupe.is_duplicate(retransmit)                                  # new IP id
     assert not dedupe.is_duplicate(sn.parse_packet(http_get(), timestamp=2.0))  # outside window
+
+
+def test_deduplicator_keeps_distinct_packets_that_share_ident_zero():
+    dedupe = sn.Deduplicator()
+    ack_1 = sn.parse_packet(ipv4(6, tcp(1, 2, 0x10, seq=500, ack=1000), ident=0), timestamp=1.0000)
+    ack_2 = sn.parse_packet(ipv4(6, tcp(1, 2, 0x10, seq=500, ack=2460), ident=0), timestamp=1.0001)
+    assert not dedupe.is_duplicate(ack_1)
+    assert not dedupe.is_duplicate(ack_2)                       # differs only in the ack number
+    assert dedupe.is_duplicate(sn.parse_packet(ipv4(6, tcp(1, 2, 0x10, seq=500, ack=2460), ident=0),
+                                               timestamp=1.0002))   # a true duplicate is still dropped
+    # same-sized datagrams (QUIC-like), and every IPv6 packet has id 0
+    d1 = sn.parse_packet(ipv6(17, udp(5000, 443, b"A" * 40)), timestamp=2.0000)
+    d2 = sn.parse_packet(ipv6(17, udp(5000, 443, b"B" * 40)), timestamp=2.0001)
+    assert not dedupe.is_duplicate(d1) and not dedupe.is_duplicate(d2)
 
 
 def test_deduplicator_uses_tight_window_for_ident_zero():

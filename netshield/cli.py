@@ -15,8 +15,9 @@ from datetime import datetime
 from netshield import scanning, sniffing, theme
 from netshield.modules.hashing import ALGORITHMS, hash_text
 from netshield.modules.password import generate_password, score_password
+from netshield.modules.analyzer import format_stream_list
 from netshield.modules.portdb import lookup
-from netshield.modules.scanner import format_table
+from netshield.modules.scanner import format_table, format_tls_report, summarize_counts
 from netshield.theme import say
 
 
@@ -29,12 +30,15 @@ def build_parser():
     parser.add_argument("--theme", choices=theme.available_themes(), help="colour theme")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    scan = sub.add_parser("scan", help="TCP port & service scan")
+    scan = sub.add_parser("scan", help="TCP (default) or UDP port & service scan")
     scan.add_argument("target", help="IP address or hostname")
     scan.add_argument("-p", "--ports", default="top",
                       help="22,80 | 1-1000 | top | all (default: top)")
-    scan.add_argument("-t", "--timeout", type=float, default=scanning.DEFAULT_TIMEOUT,
-                      help=f"seconds per port (default {scanning.DEFAULT_TIMEOUT})")
+    scan.add_argument("--udp", action="store_true",
+                      help="scan UDP instead of TCP (DNS/NTP/SNMP get real probes)")
+    scan.add_argument("-t", "--timeout", type=float, default=None,
+                      help=f"seconds per port (default {scanning.DEFAULT_TIMEOUT} TCP, "
+                           f"{scanning.UDP_TIMEOUT} per attempt UDP)")
     scan.add_argument("-w", "--workers", type=int, default=100, help="threads (max 300)")
     scan.add_argument("--no-banner", action="store_true", help="skip banner grabbing")
     scan.add_argument("--all", action="store_true", help="also list closed/filtered ports")
@@ -60,6 +64,13 @@ def build_parser():
     analyze.add_argument("-f", "--filter", default="", help="e.g. 'dns' or 'host 10.0.0.5'")
     analyze.add_argument("-n", "--limit", type=int, default=50, help="max packets to print")
     analyze.add_argument("--stats", action="store_true", help="show statistics instead of packets")
+    analyze.add_argument("--streams", action="store_true", help="list TCP streams")
+    analyze.add_argument("--follow", type=int, metavar="N",
+                         help="print the reassembled data of TCP stream number N (see --streams)")
+
+    tls = sub.add_parser("tls", help="inspect a TLS service: protocol, certificate, weaknesses")
+    tls.add_argument("target", help="host or host:port (default port 443)")
+    tls.add_argument("-t", "--timeout", type=float, default=scanning.DEFAULT_TIMEOUT)
 
     ports = sub.add_parser("ports", help="look up a port number or service name")
     ports.add_argument("query")
@@ -100,18 +111,26 @@ def _write_or_print(text, path):
 
 
 def cmd_scan(args):
+    protocol = "udp" if args.udp else "tcp"
     ip = scanning.resolve_target(args.target)
-    ports = scanning.parse_ports(args.ports)
+    ports = scanning.parse_ports(args.ports, protocol)
     if not _authorised(ip, args.yes):
         say("error", "[-] Cancelled.")
         return 1
     started = datetime.now()
     results = scanning.scan_ports(ip, ports, timeout=args.timeout, workers=args.workers,
-                                  grab_banner=not args.no_banner)
-    shown = results if args.all else [r for r in results if r.state == scanning.OPEN]
+                                  grab_banner=not args.no_banner, protocol=protocol,
+                                  server_name=scanning.hostname_or_none(args.target))
+    if args.all:
+        shown = results
+    else:
+        shown = [r for r in results if r.state == scanning.OPEN]
+        if protocol == "udp" and not shown:  # UDP silence is the common case; show it
+            shown = [r for r in results if r.state == scanning.OPEN_FILTERED]
 
     if args.format == "json":
-        text = json.dumps({"target": args.target, "ip": ip, "scanned_at": started.isoformat(),
+        text = json.dumps({"target": args.target, "ip": ip, "protocol": protocol,
+                           "scanned_at": started.isoformat(),
                            "results": [r.to_dict() for r in shown]}, indent=2)
     elif args.format == "csv":
         buffer = io.StringIO()
@@ -121,12 +140,9 @@ def cmd_scan(args):
             writer.writerow([r.port, r.state, r.service, r.version, r.banner, r.risk])
         text = buffer.getvalue().rstrip("\n")
     else:
-        counts = {s: sum(r.state == s for r in results)
-                  for s in (scanning.OPEN, scanning.CLOSED, scanning.FILTERED)}
-        text = (f"NetShield scan of {args.target} ({ip}) at {started:%Y-%m-%d %H:%M:%S}\n"
+        text = (f"NetShield {protocol.upper()} scan of {args.target} ({ip}) at {started:%Y-%m-%d %H:%M:%S}\n"
                 + (format_table(shown) if shown else "No open ports found.")
-                + f"\n\n{counts['open']} open, {counts['closed']} closed, "
-                  f"{counts['filtered']} filtered ({len(ports)} ports)")
+                + f"\n\n{summarize_counts(results)} ({len(ports)} ports)")
     return _write_or_print(text, args.output)
 
 
@@ -169,8 +185,34 @@ def cmd_sniff(args):
     return 0
 
 
+def cmd_tls(args):
+    host, _, port_text = args.target.partition(":") if args.target.count(":") == 1 else (args.target, "", "")
+    port = int(port_text) if port_text else 443
+    ip = scanning.resolve_target(host)
+    try:
+        info = scanning.tls_info(ip, port, timeout=args.timeout, server_name=host)
+    except OSError as error:  # includes ssl.SSLError and timeouts
+        say("error", f"[-] TLS handshake with {host}:{port} failed: {error}")
+        return 1
+    print(format_tls_report(host, port, info))
+    return 0
+
+
 def cmd_analyze(args):
     packet_filter = sniffing.compile_filter(args.filter)
+    if args.streams or args.follow is not None:
+        packets = [p for p in sniffing.read_pcap(args.file) if packet_filter(p)]
+        streams = sniffing.tcp_streams(packets)
+        if args.follow is None:
+            print(format_stream_list(streams) if streams else "No TCP streams found.")
+            return 0
+        if not 0 <= args.follow < len(streams):
+            say("error", f"[-] Stream {args.follow} does not exist ({len(streams)} found; see --streams).")
+            return 1
+        print(f"Stream {args.follow}: {streams[args.follow].label()}\n")
+        print(streams[args.follow].render())
+        return 0
+
     stats = sniffing.CaptureStats()
     printed = matched = 0
     for packet in sniffing.read_pcap(args.file):
@@ -213,7 +255,7 @@ def cmd_passwd(args):
 
 
 COMMANDS = {"scan": cmd_scan, "discover": cmd_discover, "sniff": cmd_sniff,
-            "analyze": cmd_analyze, "ports": cmd_ports, "hash": cmd_hash,
+            "analyze": cmd_analyze, "tls": cmd_tls, "ports": cmd_ports, "hash": cmd_hash,
             "passwd": cmd_passwd}
 
 

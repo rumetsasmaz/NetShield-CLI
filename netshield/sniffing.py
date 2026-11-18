@@ -13,10 +13,13 @@ Layers, kept apart on purpose:
 * `PacketSniffer` opens a raw socket. This needs Administrator (Windows) or
   root (Linux) and only works on networks you own or may monitor.
 
-Limits: IPv4 only; classic pcap only (no pcapng); on Windows a raw socket sees
+IPv6 is decoded everywhere (pcap files, Linux live capture). Live IPv6 capture
+on Windows is NOT supported: the IPv4 raw socket used there never sees it.
+Other limits: classic pcap only (no pcapng); on Windows a raw socket sees
 IP-level traffic of a single interface (no Ethernet headers).
 """
 
+import ipaddress
 import socket
 import struct
 import sys
@@ -24,7 +27,11 @@ import time
 from collections import Counter
 from dataclasses import dataclass, field
 
-PROTOCOLS = {1: "ICMP", 6: "TCP", 17: "UDP"}
+PROTOCOLS = {1: "ICMP", 6: "TCP", 17: "UDP", 58: "ICMPv6"}
+ICMPV6_TYPES = {1: "dest-unreachable", 3: "time-exceeded", 128: "echo-request",
+                129: "echo-reply", 133: "router-solicit", 134: "router-advert",
+                135: "neighbor-solicit", 136: "neighbor-advert"}
+_ETHERTYPES_IP = (b"\x08\x00", b"\x86\xdd")  # IPv4, IPv6
 TCP_FLAGS = (("FIN", 0x01), ("SYN", 0x02), ("RST", 0x04), ("PSH", 0x08),
              ("ACK", 0x10), ("URG", 0x20))
 ICMP_TYPES = {0: "echo-reply", 3: "dest-unreachable", 8: "echo-request",
@@ -46,12 +53,14 @@ class Packet:
     dst: str
     protocol: str
     length: int
+    version: int = 4
     ttl: int = 0
     ident: int = 0
     src_port: int = 0
     dst_port: int = 0
     flags: str = ""
     seq: int = 0
+    ack: int = 0
     info: str = ""
     timestamp: float = 0.0
     payload: bytes = field(default=b"", repr=False)
@@ -59,12 +68,17 @@ class Packet:
 
     def summary(self):
         if self.src_port or self.dst_port:
-            left, right = f"{self.src}:{self.src_port}", f"{self.dst}:{self.dst_port}"
+            left, right = self.endpoint(self.src, self.src_port), self.endpoint(self.dst, self.dst_port)
         else:
             left, right = self.src, self.dst
         flags = f" [{self.flags}]" if self.flags else ""
         info = f" {self.info}" if self.info else ""
-        return f"{self.protocol:<5} {left:>21} -> {right:<21} len={self.length}{flags}{info}"
+        return f"{self.protocol:<6} {left:>21} -> {right:<21} len={self.length}{flags}{info}"
+
+    @staticmethod
+    def endpoint(address, port):
+        """'1.2.3.4:80' or, for IPv6, '[::1]:80'."""
+        return f"[{address}]:{port}" if ":" in address else f"{address}:{port}"
 
 
 # --- pure parsers ----------------------------------------------------------
@@ -88,6 +102,44 @@ def parse_ipv4(data):
         "total_length": total_length,
     }
     return header, data[header_len:]
+
+
+_EXTENSION_HEADERS = {0, 43, 60}  # hop-by-hop, routing, destination options
+
+
+def parse_ipv6(data):
+    """Return (header dict, payload bytes). Skips extension headers.
+
+    header["protocol"] is the upper-layer protocol number. For a non-first
+    fragment the upper layer cannot be decoded, so protocol is set to 44.
+    Raises ValueError if malformed.
+    """
+    if len(data) < 40:
+        raise ValueError("too short for an IPv6 header")
+    first, payload_length, next_header, hop_limit = struct.unpack("!IHBB", data[:8])
+    if first >> 28 != 6:
+        raise ValueError("not an IPv6 packet")
+    src = socket.inet_ntop(socket.AF_INET6, data[8:24])
+    dst = socket.inet_ntop(socket.AF_INET6, data[24:40])
+    payload = data[40:40 + payload_length]
+    for _ in range(8):  # extension header chain (bounded)
+        if next_header in _EXTENSION_HEADERS or next_header == 51:
+            if len(payload) < 8:
+                raise ValueError("truncated IPv6 extension header")
+            length = (payload[1] + 2) * 4 if next_header == 51 else (payload[1] + 1) * 8
+            next_header, payload = payload[0], payload[length:]
+        elif next_header == 44:  # fragment
+            if len(payload) < 8:
+                raise ValueError("truncated IPv6 fragment header")
+            offset = struct.unpack("!H", payload[2:4])[0] >> 3
+            if offset:
+                return {"ttl": hop_limit, "ident": 0, "protocol": 44, "src": src, "dst": dst,
+                        "total_length": 40 + payload_length}, b""
+            next_header, payload = payload[0], payload[8:]
+        else:
+            break
+    return {"ttl": hop_limit, "ident": 0, "protocol": next_header, "src": src, "dst": dst,
+            "total_length": 40 + payload_length}, payload
 
 
 def tcp_flag_names(flags):
@@ -212,16 +264,23 @@ def printable_preview(payload, limit=60):
 
 
 def parse_packet(data, timestamp=0.0):
-    """Decode a raw IPv4 packet into a Packet. Raises ValueError if malformed."""
-    ip, rest = parse_ipv4(data)
+    """Decode a raw IPv4 or IPv6 packet into a Packet. Raises ValueError if malformed."""
+    if not data:
+        raise ValueError("empty packet")
+    version = data[0] >> 4
+    if version == 6:
+        ip, rest = parse_ipv6(data)
+    else:
+        ip, rest = parse_ipv4(data)
     name = PROTOCOLS.get(ip["protocol"], f"IP/{ip['protocol']}")
-    packet = Packet(src=ip["src"], dst=ip["dst"], protocol=name,
+    packet = Packet(src=ip["src"], dst=ip["dst"], protocol=name, version=version,
                     length=ip["total_length"], ttl=ip["ttl"], ident=ip["ident"],
                     timestamp=timestamp, raw=data)
     if name == "TCP":
         tcp, payload = parse_tcp(rest)
         packet.src_port, packet.dst_port = tcp["src_port"], tcp["dst_port"]
         packet.flags, packet.seq, packet.payload = tcp["flags"], tcp["seq"], payload
+        packet.ack = tcp["ack"]
         packet.info = printable_preview(payload)
     elif name == "UDP":
         udp, payload = parse_udp(rest)
@@ -229,9 +288,10 @@ def parse_packet(data, timestamp=0.0):
         packet.payload = payload
         if 53 in (udp["src_port"], udp["dst_port"]):
             packet.info = dns_summary(payload)
-    elif name == "ICMP":
+    elif name in ("ICMP", "ICMPv6"):
         icmp, payload = parse_icmp(rest)
-        packet.info = ICMP_TYPES.get(icmp["type"], f"type={icmp['type']}")
+        types = ICMPV6_TYPES if name == "ICMPv6" else ICMP_TYPES
+        packet.info = types.get(icmp["type"], f"type={icmp['type']}")
         packet.payload = payload
     return packet
 
@@ -317,17 +377,23 @@ class _FilterParser:
         if token in ("tcp", "udp", "icmp"):
             name = token.upper()
             return lambda p: p.protocol == name
+        if token in ("icmp6", "icmpv6"):
+            return lambda p: p.protocol == "ICMPv6"
+        if token in ("ip", "ip4", "ipv4"):
+            return lambda p: p.version == 4
+        if token in ("ip6", "ipv6"):
+            return lambda p: p.version == 6
         if token == "dns":
             return lambda p: p.protocol == "UDP" and 53 in (p.src_port, p.dst_port)
         direction = None
         if token in ("src", "dst"):
             direction, token = token, self._take("'host' or 'port'")
         if token == "host":
-            ip = self._take("an IP address")
+            text = self._take("an IP address")
             try:
-                socket.inet_aton(ip)
-            except OSError:
-                raise FilterError(f"'{ip}' is not an IPv4 address") from None
+                ip = str(ipaddress.ip_address(text))  # normalised, same form as decoded packets
+            except ValueError:
+                raise FilterError(f"'{text}' is not an IP address") from None
             if direction == "src":
                 return lambda p: p.src == ip
             if direction == "dst":
@@ -388,6 +454,148 @@ class CaptureStats:
         return "\n".join(lines)
 
 
+# --- TCP streams ("Follow TCP Stream") ---------------------------------------
+@dataclass
+class StreamChunk:
+    direction: str          # "client" or "server"
+    timestamp: float
+    data: bytes = b""
+    missing: int = 0        # bytes lost before this chunk (capture gap), data is empty then
+
+
+class TcpStream:
+    """All packets of one TCP conversation, reassembled per direction."""
+
+    def __init__(self, key):
+        self.key = key
+        self.packets = []
+
+    def add(self, packet):
+        self.packets.append(packet)
+
+    @property
+    def client(self):
+        """Endpoint that opened the connection (first bare SYN), else first sender."""
+        for packet in self.packets:
+            if packet.flags == "SYN":
+                return (packet.src, packet.src_port)
+        first = self.packets[0]
+        return (first.src, first.src_port)
+
+    @property
+    def server(self):
+        return next(ep for ep in self.key if ep != self.client) if len(set(self.key)) > 1 else self.client
+
+    def label(self):
+        c, s = self.client, self.server
+        return f"{Packet.endpoint(*c)} <-> {Packet.endpoint(*s)}"
+
+    def byte_counts(self):
+        counts = {"client": 0, "server": 0}
+        for chunk in self.chunks():
+            counts[chunk.direction] += len(chunk.data)
+        return counts
+
+    def guess_protocol(self):
+        for chunk in self.chunks():
+            head = chunk.data[:8]
+            if head.startswith((b"GET ", b"POST ", b"HEAD ", b"PUT ", b"HTTP/", b"DELE", b"OPTI")):
+                return "http"
+            if head.startswith(b"\x16\x03"):
+                return "tls"
+            if head.startswith(b"SSH-"):
+                return "ssh"
+            if head[:4] in (b"220 ", b"EHLO", b"HELO"):
+                return "smtp/ftp"
+            return ""
+        return ""
+
+    def chunks(self):
+        """Reassembled data in time order. Retransmissions are dropped and gaps
+        are reported as chunks with `missing` set."""
+        client = self.client
+        by_direction = {"client": [], "server": []}
+        syn = {"client": None, "server": None}
+        for packet in self.packets:
+            key = "client" if (packet.src, packet.src_port) == client else "server"
+            if syn[key] is None and "SYN" in packet.flags.split("|"):
+                syn[key] = packet
+            if packet.payload:
+                by_direction[key].append(packet)
+
+        chunks = []
+        for direction, packets in by_direction.items():
+            if not packets:
+                continue
+            # With the SYN we know where the data starts (ISN + 1), so loss at the
+            # very beginning of a stream is detectable too.
+            base = syn[direction].seq if syn[direction] else packets[0].seq
+
+            def relative(p, base=base):  # signed distance, safe across 32-bit wrap
+                return ((p.seq - base + 2 ** 31) & 0xFFFFFFFF) - 2 ** 31
+
+            expected = 1 if syn[direction] else None
+            latest = 0.0
+            for packet in sorted(packets, key=relative):
+                seq, data = relative(packet), packet.payload
+                if expected is None:
+                    expected = seq
+                if seq + len(data) <= expected:
+                    continue  # retransmission of data we already have
+                if seq < expected:
+                    data, seq = data[expected - seq:], expected
+                # Data is ordered by sequence number; make timestamps follow that
+                # order, otherwise the time-sort below would undo the reordering.
+                latest = max(latest, packet.timestamp)
+                if seq > expected:
+                    chunks.append(StreamChunk(direction, latest, b"", seq - expected))
+                chunks.append(StreamChunk(direction, latest, data))
+                expected = seq + len(data)
+        return sorted(chunks, key=lambda c: (c.timestamp, c.direction))
+
+    def render(self, limit=100_000):
+        """Readable text: one block per direction change; non-printable bytes as '.'."""
+        lines, current, buffer, total = [], None, [], 0
+
+        def flush():
+            if buffer:
+                text = b"".join(buffer).decode("latin-1")
+                text = "".join(ch if ch == "\n" or " " <= ch <= "~" else "." for ch in text.replace("\r", ""))
+                arrow = "client -> server" if current == "client" else "server -> client"
+                lines.append(f"--- {arrow} ({sum(len(b) for b in buffer)} bytes) ---")
+                lines.append(text)
+            buffer.clear()
+
+        for chunk in self.chunks():
+            if chunk.missing:
+                flush()
+                lines.append(f"[... {chunk.missing} byte(s) missing from capture ...]")
+                current = None
+                continue
+            if chunk.direction != current:
+                flush()
+                current = chunk.direction
+            buffer.append(chunk.data)
+            total += len(chunk.data)
+            if total >= limit:
+                flush()
+                lines.append(f"[... output truncated at {limit} bytes ...]")
+                return "\n".join(lines)
+        flush()
+        return "\n".join(lines) if lines else "(no payload data in this stream)"
+
+
+def tcp_streams(packets):
+    """Group TCP packets into streams, in order of first appearance."""
+    streams = {}
+    for packet in packets:
+        if packet.protocol != "TCP":
+            continue
+        key = tuple(sorted(((packet.src, packet.src_port), (packet.dst, packet.dst_port))))
+        streams.setdefault(key, TcpStream(key)).add(packet)
+    return list(streams.values())
+
+
 class Deduplicator:
     """Drop packets seen twice within a short window.
 
@@ -407,8 +615,12 @@ class Deduplicator:
     def is_duplicate(self, packet, now=None):
         now = packet.timestamp if now is None else now
         window = self.window if packet.ident else self.zero_id_window
+        # Everything that distinguishes two genuinely different packets must be in
+        # the key (ack number and payload too), otherwise a burst of ACKs or
+        # same-sized datagrams with IP id 0 (all of IPv6) would be dropped.
         key = (packet.src, packet.dst, packet.protocol, packet.ident, packet.seq,
-               packet.src_port, packet.dst_port, packet.length, packet.flags)
+               packet.ack, packet.src_port, packet.dst_port, packet.length,
+               packet.flags, hash(packet.payload))
         previous = self._seen.get(key)
         self._seen[key] = now
         if len(self._seen) > 2000:
@@ -481,11 +693,11 @@ def read_pcap(path):
             if len(data) < included:
                 return  # truncated final record
             if linktype == _LINKTYPE_ETHERNET:
-                if len(data) < 14 or data[12:14] != b"\x08\x00":
+                if len(data) < 14 or data[12:14] not in _ETHERTYPES_IP:
                     continue
                 data = data[14:]
             elif linktype == _LINKTYPE_LINUX_SLL:
-                if len(data) < 16 or data[14:16] != b"\x08\x00":
+                if len(data) < 16 or data[14:16] not in _ETHERTYPES_IP:
                     continue
                 data = data[16:]
             divisor = 1_000_000_000 if nanosecond else 1_000_000
@@ -552,8 +764,8 @@ class PacketSniffer:
                 yield None  # lets the caller check for Ctrl+C / limits
                 continue
             if sys.platform != "win32":
-                if len(data) < 14 or data[12:14] != b"\x08\x00":
-                    continue  # not IPv4 over Ethernet
+                if len(data) < 14 or data[12:14] not in _ETHERTYPES_IP:
+                    continue  # not IP over Ethernet
                 data = data[14:]
             try:
                 packet = parse_packet(data, timestamp=time.time())

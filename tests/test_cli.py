@@ -81,6 +81,49 @@ def test_analyze_errors(tmp_path):
     assert cli.run(["analyze", str(bad), "-f", "tcp and"]) == 1
 
 
+def test_scan_udp_json(udp_server, tmp_path):
+    port = udp_server(lambda data: b"pong")
+    out = tmp_path / "udp.json"
+    assert cli.run(["scan", "127.0.0.1", "--udp", "-p", str(port), "-t", "0.5",
+                    "--format", "json", "-o", str(out)]) == 0
+    report = json.loads(out.read_text(encoding="utf-8"))
+    assert report["protocol"] == "udp"
+    assert report["results"][0]["state"] == "open" and report["results"][0]["protocol"] == "udp"
+
+
+def test_scan_udp_table_lists_silent_ports(udp_server, capsys):
+    port = udp_server(lambda data: None)
+    assert cli.run(["scan", "127.0.0.1", "--udp", "-p", str(port), "-t", "0.3"]) == 0
+    out = capsys.readouterr().out
+    assert f"{port}/udp" in out and "open|filtered" in out
+
+
+def test_tls_command(tls_server, capsys):
+    port = tls_server("localhost")
+    assert cli.run(["tls", f"127.0.0.1:{port}", "-t", "3"]) == 0
+    out = capsys.readouterr().out
+    assert "Subject  : localhost" in out and "self-signed certificate" in out and "SHA-256" in out
+
+
+def test_tls_command_failure_returns_1(closed_udp_port):
+    assert cli.run(["tls", f"127.0.0.1:{closed_udp_port}", "-t", "1"]) == 1
+
+
+def test_analyze_streams_and_follow(tmp_path, capsys):
+    from tests.test_ipv6_streams import http_conversation
+    path = tmp_path / "http.pcap"
+    with sn.PcapWriter(path) as writer:
+        for packet in http_conversation():
+            writer.write(packet)
+    assert cli.run(["analyze", str(path), "--streams"]) == 0
+    out = capsys.readouterr().out
+    assert "10.0.0.5:51000 <-> 93.184.216.34:80" in out and "http" in out
+    assert cli.run(["analyze", str(path), "--follow", "0"]) == 0
+    out = capsys.readouterr().out
+    assert "GET /index.html HTTP/1.1" in out and "hello world" in out
+    assert cli.run(["analyze", str(path), "--follow", "7"]) == 1
+
+
 def test_small_commands(capsys):
     assert cli.run(["ports", "rdp"]) == 0 and "3389" in capsys.readouterr().out
     assert cli.run(["ports", "zzz"]) == 1
