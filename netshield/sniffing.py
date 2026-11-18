@@ -15,8 +15,9 @@ Layers, kept apart on purpose:
 
 IPv6 is decoded everywhere (pcap files, Linux live capture). Live IPv6 capture
 on Windows is NOT supported: the IPv4 raw socket used there never sees it.
-Other limits: classic pcap only (no pcapng); on Windows a raw socket sees
-IP-level traffic of a single interface (no Ethernet headers).
+Files: classic pcap and pcapng are read (Ethernet incl. VLAN, raw IP, Linux
+SLL/SLL2, BSD/Npcap loopback); captures are written as classic pcap.
+On Windows a raw socket sees IP-level traffic of a single interface.
 """
 
 import ipaddress
@@ -596,6 +597,24 @@ def tcp_streams(packets):
     return list(streams.values())
 
 
+def drop_exact_copies(packets, window=0.05):
+    """Remove byte-identical copies of a packet logged within `window` seconds.
+
+    Some capture tools (Windows pktmon) record each packet once per network
+    component it passes, so one packet can appear 5-10 times in the file.
+    Returns (kept packets, number dropped).
+    """
+    kept, dropped, last_seen = [], 0, {}
+    for packet in packets:
+        previous = last_seen.get(packet.raw)
+        last_seen[packet.raw] = packet.timestamp
+        if previous is not None and abs(packet.timestamp - previous) <= window:
+            dropped += 1
+            continue
+        kept.append(packet)
+    return kept, dropped
+
+
 class Deduplicator:
     """Drop packets seen twice within a short window.
 
@@ -659,52 +678,182 @@ class PcapWriter:
         self.close()
 
 
-def read_pcap(path):
-    """Yield decoded Packets from a classic pcap file.
+_LINKTYPE_NULL, _LINKTYPE_IPV4, _LINKTYPE_IPV6, _LINKTYPE_LINUX_SLL2 = 0, 228, 229, 276
+_LINKTYPE_IEEE802_11 = 105
+SUPPORTED_LINKTYPES = {_LINKTYPE_NULL, _LINKTYPE_ETHERNET, _LINKTYPE_RAW, _LINKTYPE_LINUX_SLL,
+                       _LINKTYPE_IPV4, _LINKTYPE_IPV6, _LINKTYPE_LINUX_SLL2, _LINKTYPE_IEEE802_11}
+_LLC_SNAP = b"\xaa\xaa\x03\x00\x00\x00"
 
-    Non-IPv4 frames are skipped. Raises ValueError for unsupported/corrupt files.
+
+def wifi_payload(frame):
+    """IP packet inside an unencrypted 802.11 data frame (LLC/SNAP encapsulated), else None.
+
+    Windows pktmon writes Wi-Fi adapters' frames like this while labelling the
+    file as Ethernet, so Ethernet frames that don't parse are tried here too.
+    """
+    if len(frame) < 24 or (frame[0] >> 2) & 0x3 != 2:       # frame type 2 = data
+        return None
+    header = 24
+    if frame[1] & 0x03 == 0x03:                             # ToDS + FromDS: fourth address
+        header += 6
+    if frame[0] & 0x80:                                     # QoS data subtype
+        header += 2
+        if frame[1] & 0x80:                                 # +HT control field
+            header += 4
+    snap = frame[header:header + 8]
+    if len(snap) < 8 or snap[:6] != _LLC_SNAP or snap[6:8] not in _ETHERTYPES_IP:
+        return None                                         # encrypted or not IP
+    return frame[header + 8:]
+_NULL_FAMILIES = {2, 24, 28, 30}         # AF_INET, and AF_INET6 on the BSDs / macOS
+_MAX_RECORD = 262144
+_MAX_BLOCK = 16 * 1024 * 1024
+
+
+def frame_to_ip(linktype, frame):
+    """Strip the link-layer header. Returns the IP packet bytes, or None to skip."""
+    if linktype in (_LINKTYPE_RAW, _LINKTYPE_IPV4, _LINKTYPE_IPV6):
+        return frame
+    if linktype == _LINKTYPE_ETHERNET:
+        if len(frame) >= 18 and frame[12:14] == b"\x81\x00":      # 802.1Q VLAN tag
+            return frame[18:] if frame[16:18] in _ETHERTYPES_IP else None
+        if len(frame) >= 14 and frame[12:14] in _ETHERTYPES_IP:
+            return frame[14:]
+        return wifi_payload(frame)                                 # mislabelled Wi-Fi (pktmon)
+    if linktype == _LINKTYPE_IEEE802_11:
+        return wifi_payload(frame)
+    if linktype == _LINKTYPE_LINUX_SLL:
+        return frame[16:] if len(frame) >= 16 and frame[14:16] in _ETHERTYPES_IP else None
+    if linktype == _LINKTYPE_LINUX_SLL2:
+        return frame[20:] if len(frame) >= 20 and frame[0:2] in _ETHERTYPES_IP else None
+    if linktype == _LINKTYPE_NULL and len(frame) >= 4:
+        # 4-byte address family in the *capturing* machine's byte order
+        family = int.from_bytes(frame[:4], "little")
+        if family not in _NULL_FAMILIES:
+            family = int.from_bytes(frame[:4], "big")
+        return frame[4:] if family in _NULL_FAMILIES else None
+    return None
+
+
+def _decode(linktype, frame, timestamp):
+    data = frame_to_ip(linktype, frame)
+    if data is None:
+        return None
+    try:
+        return parse_packet(data, timestamp=timestamp)
+    except ValueError:
+        return None
+
+
+def read_pcap(path):
+    """Yield decoded Packets from a .pcap or .pcapng file (format is detected).
+
+    Frames that are not IPv4/IPv6 are skipped.
+    Raises ValueError for unsupported or corrupt files.
     """
     with open(path, "rb") as file:
-        header = file.read(24)
-        if len(header) < 24:
+        magic = file.read(4)
+        if len(magic) < 4:
             raise ValueError("file is too short to be a pcap capture")
-        magic = header[:4]
-        if magic == b"\x0a\x0d\x0d\x0a":
-            raise ValueError("pcapng is not supported; save as classic pcap in Wireshark")
-        if magic in (b"\xd4\xc3\xb2\xa1", b"\x4d\x3c\xb2\xa1"):
-            endian = "<"
-        elif magic in (b"\xa1\xb2\xc3\xd4", b"\xa1\xb2\x3c\x4d"):
-            endian = ">"
-        else:
-            raise ValueError("not a pcap file")
-        nanosecond = magic in (b"\x4d\x3c\xb2\xa1", b"\xa1\xb2\x3c\x4d")
-        linktype = struct.unpack(endian + "I", header[20:24])[0]
-        if linktype not in (_LINKTYPE_ETHERNET, _LINKTYPE_RAW, _LINKTYPE_LINUX_SLL):
-            raise ValueError(f"unsupported link type {linktype}")
+        file.seek(0)
+        reader = _read_pcapng if magic == b"\x0a\x0d\x0d\x0a" else _read_classic
+        for packet in reader(file):
+            if packet is not None:
+                yield packet
 
-        while True:
-            record = file.read(16)
-            if len(record) < 16:
-                return
-            seconds, fraction, included, _original = struct.unpack(endian + "IIII", record)
-            if included > 262144:
-                raise ValueError("corrupt record length")
-            data = file.read(included)
-            if len(data) < included:
-                return  # truncated final record
-            if linktype == _LINKTYPE_ETHERNET:
-                if len(data) < 14 or data[12:14] not in _ETHERTYPES_IP:
-                    continue
-                data = data[14:]
-            elif linktype == _LINKTYPE_LINUX_SLL:
-                if len(data) < 16 or data[14:16] not in _ETHERTYPES_IP:
-                    continue
-                data = data[16:]
-            divisor = 1_000_000_000 if nanosecond else 1_000_000
-            try:
-                yield parse_packet(data, timestamp=seconds + fraction / divisor)
-            except ValueError:
-                continue
+
+read_capture = read_pcap
+
+
+def _read_classic(file):
+    header = file.read(24)
+    if len(header) < 24:
+        raise ValueError("file is too short to be a pcap capture")
+    magic = header[:4]
+    if magic in (b"\xd4\xc3\xb2\xa1", b"\x4d\x3c\xb2\xa1"):
+        endian = "<"
+    elif magic in (b"\xa1\xb2\xc3\xd4", b"\xa1\xb2\x3c\x4d"):
+        endian = ">"
+    else:
+        raise ValueError("not a pcap file")
+    divisor = 1_000_000_000 if magic in (b"\x4d\x3c\xb2\xa1", b"\xa1\xb2\x3c\x4d") else 1_000_000
+    linktype = struct.unpack(endian + "I", header[20:24])[0]
+    if linktype not in SUPPORTED_LINKTYPES:
+        raise ValueError(f"unsupported link type {linktype}")
+    while True:
+        record = file.read(16)
+        if len(record) < 16:
+            return
+        seconds, fraction, included, _original = struct.unpack(endian + "IIII", record)
+        if included > _MAX_RECORD:
+            raise ValueError("corrupt record length")
+        data = file.read(included)
+        if len(data) < included:
+            return  # truncated final record
+        yield _decode(linktype, data, seconds + fraction / divisor)
+
+
+def _interface_resolution(options, endian):
+    """Seconds per timestamp unit from IDB options (if_tsresol, code 9); default 1 µs."""
+    offset = 0
+    while offset + 4 <= len(options):
+        code, length = struct.unpack(endian + "HH", options[offset:offset + 4])
+        if code == 0:
+            break
+        value = options[offset + 4:offset + 4 + length]
+        if code == 9 and value:
+            exponent = value[0] & 0x7F
+            return 2.0 ** -exponent if value[0] & 0x80 else 10.0 ** -exponent
+        offset += 4 + length + (-length % 4)
+    return 1e-6
+
+
+def _read_pcapng(file):
+    """pcapng (Wireshark's default format): sections, interfaces, packet blocks."""
+    endian, interfaces = "<", []
+    while True:
+        head = file.read(8)
+        if len(head) < 8:
+            return
+        if head[:4] == b"\x0a\x0d\x0d\x0a":              # Section Header Block
+            byte_order = file.read(4)
+            if byte_order == b"\x4d\x3c\x2b\x1a":
+                endian = "<"
+            elif byte_order == b"\x1a\x2b\x3c\x4d":
+                endian = ">"
+            else:
+                raise ValueError("pcapng: bad byte-order magic (corrupt file?)")
+            total = struct.unpack(endian + "I", head[4:8])[0]
+            if total < 28 or total % 4 or total > _MAX_BLOCK:
+                raise ValueError("pcapng: bad section header length")
+            file.read(total - 12)
+            interfaces = []                              # interface ids restart per section
+            continue
+
+        block_type, total = struct.unpack(endian + "II", head)
+        if total < 12 or total % 4 or total > _MAX_BLOCK:
+            raise ValueError("pcapng: corrupt block length")
+        body = file.read(total - 8)
+        if len(body) < total - 8:
+            return                                       # truncated final block
+        body = body[:-4]                                 # drop the trailing length copy
+
+        if block_type == 1 and len(body) >= 8:           # Interface Description Block
+            linktype = struct.unpack(endian + "H", body[:2])[0]
+            interfaces.append((linktype, _interface_resolution(body[8:], endian)))
+        elif block_type == 6 and len(body) >= 20:        # Enhanced Packet Block
+            iface, high, low, captured, _original = struct.unpack(endian + "IIIII", body[:20])
+            if iface < len(interfaces):
+                linktype, unit = interfaces[iface]
+                yield _decode(linktype, body[20:20 + captured], ((high << 32) | low) * unit)
+        elif block_type == 3 and len(body) >= 4 and interfaces:   # Simple Packet Block
+            original = struct.unpack(endian + "I", body[:4])[0]
+            yield _decode(interfaces[0][0], body[4:4 + original], 0.0)
+        elif block_type == 2 and len(body) >= 20:        # obsolete Packet Block
+            iface, _drops, high, low, captured, _original = struct.unpack(endian + "HHIIII", body[:20])
+            if iface < len(interfaces):
+                linktype, unit = interfaces[iface]
+                yield _decode(linktype, body[20:20 + captured], ((high << 32) | low) * unit)
+        # other blocks (name resolution, statistics, custom) carry no packets
 
 
 # --- live capture ----------------------------------------------------------

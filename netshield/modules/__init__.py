@@ -1,6 +1,8 @@
 """Module registry. To add a tool: write a BaseModule subclass and list it here."""
 
 from netshield.modules.analyzer import PcapAnalyzerModule
+from netshield.modules.dnstools import (DisclosureModule, DnsLookupModule, MailSecurityModule,
+                                        WhoisModule)
 from netshield.modules.hashing import HashCrackerModule, HashModule
 from netshield.modules.headers import HttpHeadersModule
 from netshield.modules.password import PasswordCheckerModule, PasswordGeneratorModule
@@ -14,6 +16,10 @@ ALL_MODULES = [
     HostDiscoveryModule(),
     TlsCheckModule(),
     HttpHeadersModule(),
+    DnsLookupModule(),
+    MailSecurityModule(),
+    WhoisModule(),
+    DisclosureModule(),
     PacketSnifferModule(),
     PcapAnalyzerModule(),
     PortDatabaseModule(),

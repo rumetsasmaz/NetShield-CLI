@@ -3,9 +3,10 @@
 Every module imports its colours from here instead of defining its own.
 """
 
+import os
 import sys
 
-from colorama import Fore, Style, init
+from colorama import Fore, Style, deinit, init
 
 init(autoreset=True)
 
@@ -51,6 +52,25 @@ THEMES = {
 }
 
 _current = "default"
+_colour_enabled = True
+
+# Status of a check (pass/warn/fail/info) -> theme role.
+STATUS_ROLES = {"pass": "ok", "warn": "warn", "fail": "error", "info": "plain"}
+
+
+def set_colour(mode="auto"):
+    """'always', 'never' or 'auto' (colour only on a terminal and if NO_COLOR is unset)."""
+    global _colour_enabled
+    if mode == "always":
+        _colour_enabled = True
+        # colorama strips colour codes when stdout is not a terminal; keep them.
+        deinit()
+        init(autoreset=True, strip=False)
+    elif mode == "never":
+        _colour_enabled = False
+    else:
+        _colour_enabled = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+    return _colour_enabled
 
 
 def available_themes():
@@ -72,7 +92,7 @@ def current_theme():
 
 def paint(role, text):
     """Wrap text in the colour of the given role for the active theme."""
-    colour = THEMES[_current].get(role, "")
+    colour = THEMES[_current].get(role, "") if _colour_enabled else ""
     return f"{colour}{text}{RESET}" if colour else str(text)
 
 

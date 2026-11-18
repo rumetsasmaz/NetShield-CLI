@@ -1,8 +1,6 @@
 from netshield import webaudit
 from netshield.base import BaseModule
-from netshield.theme import ask, say
-
-_ROLE = {webaudit.PASS: "ok", webaudit.WARN: "warn", webaudit.FAIL: "error", webaudit.INFO: "dim"}
+from netshield.theme import STATUS_ROLES as _ROLE, ask, say
 
 
 class HttpHeadersModule(BaseModule):

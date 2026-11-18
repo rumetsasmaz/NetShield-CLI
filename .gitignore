@@ -221,3 +221,4 @@ test.py
 # Packet captures (contain real network traffic)
 *.pcap
 *.pcapng
+*.etl

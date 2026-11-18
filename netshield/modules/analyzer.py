@@ -14,10 +14,10 @@ def format_stream_list(streams):
 
 class PcapAnalyzerModule(BaseModule):
     name = "Analyze Capture (pcap)"
-    description = "Read a .pcap file (also Wireshark captures): filter, statistics, follow TCP streams"
+    description = "Read .pcap/.pcapng files (e.g. Wireshark captures): filter, statistics, follow TCP streams"
 
     def run(self):
-        path = ask("Path to .pcap file:")
+        path = ask("Path to .pcap or .pcapng file:")
         if not path:
             say("error", "[-] No file given.")
             return
