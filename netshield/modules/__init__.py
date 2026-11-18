@@ -7,6 +7,7 @@ from netshield.modules.hashing import HashCrackerModule, HashModule
 from netshield.modules.headers import HttpHeadersModule
 from netshield.modules.password import PasswordCheckerModule, PasswordGeneratorModule
 from netshield.modules.portdb import PortDatabaseModule
+from netshield.modules.reporting import ReportModule
 from netshield.modules.scanner import HostDiscoveryModule, PortScannerModule, TlsCheckModule
 from netshield.modules.settings import ThemeModule
 from netshield.modules.sniffer import PacketSnifferModule
@@ -20,6 +21,7 @@ ALL_MODULES = [
     MailSecurityModule(),
     WhoisModule(),
     DisclosureModule(),
+    ReportModule(),
     PacketSnifferModule(),
     PcapAnalyzerModule(),
     PortDatabaseModule(),

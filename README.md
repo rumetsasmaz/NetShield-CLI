@@ -19,6 +19,7 @@ A modular, Python-based cybersecurity command-line toolkit for learning, experim
 | **Email Security** | Spoofing protection grade: SPF (qualifier, 10-lookup limit, duplicates), DMARC (policy, pct, sp), DKIM at common selectors (incl. revoked keys), null MX, CAA. |
 | **WHOIS / RDAP** | Registrar, creation/expiry dates, name servers, transfer lock, DNSSEC and registrar abuse contact. RDAP (JSON, via IANA bootstrap) first; classic WHOIS on port 43 for TLDs without RDAP (e.g. `.tr` via TRABIS). Subdomains are walked up to the registered name. |
 | **Disclosure Contact** | Finds and validates `security.txt` (RFC 9116): where and how an organisation wants vulnerabilities reported. Without one, explains the responsible-disclosure route. |
+| **Assessment Report** | Runs the passive checks (security.txt, headers, TLS, email, RDAP) and writes a Markdown/JSON report: where to report, severity summary, and per finding the evidence, impact, how to verify and the fix. No port scanning, so it only does what a normal visitor does. |
 | **Capture Analyzer** | Reads `.pcap` and **`.pcapng`** files (Wireshark's default; Ethernet/VLAN, raw IP, Linux SLL/SLL2, loopback) with no special privileges: filter, statistics, **IPv4 and IPv6**, TCP stream list and **Follow TCP Stream** (reordering, retransmission removal, gap detection). |
 | **Port Database** | Look up a port number or service name, with risk notes. |
 | **Password Checker / Generator** | Strength scoring with hints; `secrets`-based generator. |
@@ -48,6 +49,7 @@ python main.py dns example.com -t mx,txt
 python main.py mail example.com                         # SPF / DMARC / DKIM grade
 python main.py whois metu.edu.tr                        # RDAP, or WHOIS where there is no RDAP
 python main.py disclosure github.com                    # where to report vulnerabilities
+python main.py report example.com -o example.com-report.md   # passive assessment, Markdown
 python main.py --color never scan 127.0.0.1             # colour: auto (default) | always | never
 python main.py headers https://my.site --fail-under 70  # exit 1 below 70 (for CI)
 python main.py discover 192.168.1.0/24
@@ -118,7 +120,7 @@ Adding a tool = write a `BaseModule` subclass in `netshield/modules/` and list i
 
 ## 🐞 Reporting vulnerabilities to organisations
 
-1. Run `python main.py disclosure <domain>` to find the official channel (security.txt), or look for the company's bug bounty / disclosure programme (HackerOne, Bugcrowd, Intigriti, YesWeHack).
+1. Run `python main.py disclosure <domain>` to find the official channel (security.txt), or look for the company's bug bounty / disclosure programme (HackerOne, Bugcrowd, Intigriti, YesWeHack). `python main.py report <domain>` puts the channel and all passive findings into one Markdown document (files named `*-report.md` are git-ignored so reports about other organisations are never published by accident).
 2. Test **only** what the programme lists as in scope. Unauthorised testing can be a crime (in Turkey: TCK 243-244), even with good intentions.
 3. Passive findings (headers, TLS, SPF/DMARC) are a start, but many programmes classify them as informational. Describe impact, steps to reproduce and a fix, and never access, change or keep data that is not yours.
 
