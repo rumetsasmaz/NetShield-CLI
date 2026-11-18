@@ -1,222 +1,65 @@
 # 🛡️ NetShield-CLI
 
-**NetShield-CLI** is a modular, Python-based cybersecurity command-line toolkit designed for learning, experimentation, and basic security analysis.
+A modular, Python-based cybersecurity command-line toolkit for learning, experimentation and basic security analysis. Standard library plus `colorama` only.
 
-The project brings several small security utilities together into a single CLI, making it easier to practice Python programming while exploring fundamental cybersecurity concepts.
+> ⚠️ **Educational project.** Use it only on systems, networks, accounts and data you own or have explicit written permission to test.
+>
+> 🤖 **Development note:** this repository is developed with AI assistance (Claude Code).
 
-> ⚠️ **Educational Project:** NetShield-CLI is primarily developed for learning and authorized security testing. Do not use its features against systems, accounts, or data that you do not own or have explicit permission to test.
+## ✨ Tools
 
----
+| Tool | What it does |
+|---|---|
+| **Port & Service Scanner** | Threaded TCP scan. Reports `open` / `closed` / `filtered`, grabs banners (passive first, then an HTTP probe) and identifies services and versions. Port specs: `22,80`, `1-1000`, `top`, `all`. Optional JSON report. |
+| **Host Discovery** | TCP ping of a network (CIDR, max `/24`). |
+| **Packet Sniffer** | Wireshark-style capture and decoding of IPv4 TCP/UDP/ICMP with protocol/port/host filters. Needs Administrator/root. |
+| **Port Database** | Look up a port number or service name, with risk notes. |
+| **Password Checker / Generator** | Strength scoring with hints; `secrets`-based generator. |
+| **Hash Text / Hash Cracker** | MD5, SHA-1, SHA-256, SHA-512; dictionary attack with automatic algorithm detection. |
+| **Themes** | `default`, `matrix`, `hacker`, `ocean`, `mono` (saved in `~/.netshield/config.json`). |
 
-## ✨ Features
-
-### 🔐 Password Generator
-
-Generate random passwords with customizable parameters.
-
-* Configurable password length
-* Random character generation
-* Suitable for creating strong test passwords
-
-### 📊 Password Strength Checker
-
-Analyze password complexity and receive feedback about potential weaknesses.
-
-The checker evaluates factors such as:
-
-* Password length
-* Uppercase characters
-* Lowercase characters
-* Numbers
-* Special characters
-* Overall structural complexity
-
-### 🔑 Hash Generator
-
-Generate cryptographic hashes from text input.
-
-Currently supported:
-
-* MD5
-* SHA-256
-
-Useful for learning how hashing works and understanding data integrity concepts.
-
-### 🔓 Hash Cracker
-
-Perform dictionary-based hash matching against MD5 and SHA-256 hashes.
-
-This feature is intended to demonstrate:
-
-* Password hashing concepts
-* Dictionary attacks
-* Weak password exposure
-* Why strong passwords and secure password hashing are important
-
-### 🌐 Port Reference
-
-Quickly look up commonly used network ports and their associated services.
-
-Useful when learning:
-
-* TCP/IP networking
-* Common network services
-* Well-known ports
-* Basic network reconnaissance concepts
-
----
-
-## 🧰 Technologies
-
-NetShield-CLI is currently built with:
-
-* **Python 3**
-* `hashlib`
-* `random`
-* `colorama`
-
-The project intentionally keeps its dependencies lightweight to make the source code easier to understand and modify.
-
----
-
-## 📦 Installation
-
-### 1. Clone the repository
+## 📦 Install & run
 
 ```bash
 git clone https://github.com/rumetsasmaz/NetShield-CLI.git
 cd NetShield-CLI
-```
-
-### 2. Install dependencies
-
-```bash
-pip install colorama
-```
-
-### 3. Run NetShield-CLI
-
-```bash
+pip install -r requirements.txt
 python main.py
 ```
 
----
+## 🧱 Architecture
 
-## 🚀 Usage
-
-After starting the program, use the CLI menu to select the security utility you want to use.
-
-Example workflow:
-
-```text
-$ python main.py
-
-╔══════════════════════════════════╗
-║          NetShield-CLI           ║
-║     Cybersecurity Toolkit        ║
-╚══════════════════════════════════╝
-
-[1] Password Generator
-[2] Password Strength Checker
-[3] Hash Generator
-[4] Hash Cracker
-[5] Port Reference
-[0] Exit
+```
+main.py                  menu built automatically from the module registry
+netshield/
+  base.py                BaseModule (name, description, run)
+  theme.py / config.py   colours, safe output, settings
+  scanning.py            scan core (returns data, never prints)
+  sniffing.py            packet parsers (pure) + raw-socket capture
+  modules/               one BaseModule subclass per tool
 ```
 
-Select an option and follow the instructions displayed by the program.
+Adding a tool = write a `BaseModule` subclass in `netshield/modules/` and list it in `netshield/modules/__init__.py`.
 
----
+## 📝 Notes & limits
 
-## 📚 What I Am Learning With This Project
-
-NetShield-CLI is also a personal learning project.
-
-The main goals are to improve my understanding of:
-
-* Python programming
-* Functions and modules
-* Command-line interfaces
-* Exception handling
-* String manipulation
-* File handling
-* Cryptographic hashing
-* Password security
-* Dictionary-based attacks
-* Basic networking concepts
-* Security-oriented programming
-
-As the project evolves, additional security utilities may be added.
-
----
+* On Windows a refused connection is reported after ~2 s, so the default timeout is 2.5 s there. Below ~2 s, `closed` and `filtered` cannot be told apart.
+* The scanner uses plain TCP connects (no raw SYN scan, no OS fingerprinting).
+* The sniffer is IPv4 only. On Windows it sees IP-level traffic of one interface and needs an elevated terminal.
+* Service detection concepts (port states, passive banner wait before probing) follow nmap's public documentation; the code and signatures are original.
 
 ## 🗺️ Roadmap
 
-Planned improvements include:
+- [x] Modular architecture, themes, threaded scanner, packet sniffer
+- [ ] `argparse` commands (`netshield scan 10.0.0.5 -p 1-1000`)
+- [ ] More service probes and signatures, UDP scan
+- [ ] Export sniffer captures (pcap)
+- [ ] Automated tests (`pytest`), logging
 
-* [ ] Improve CLI interface
-* [ ] Add argument-based commands
-* [ ] Add more hash algorithms
-* [ ] Improve password strength analysis
-* [ ] Expand the port database
-* [ ] Add JSON output
-* [ ] Add configuration support
-* [ ] Improve error handling
-* [ ] Add logging
-* [ ] Add automated tests
-* [ ] Improve project structure
-* [ ] Add more educational security utilities
+## 🔒 Ethical use
 
----
-
-## 🔒 Security & Ethical Use
-
-NetShield-CLI is intended for:
-
-* Personal cybersecurity labs
-* CTF environments
-* Local testing
-* Educational exercises
-* Systems you own
-* Systems for which you have explicit authorization
-
-Do **not** use this software to gain unauthorized access to accounts, systems, networks, or data.
-
-The author is not responsible for misuse of this software.
-
----
-
-## 🤝 Contributing
-
-Contributions, suggestions, and improvements are welcome.
-
-If you find a bug or have an idea for a new feature:
-
-1. Fork the repository
-2. Create a new branch
-3. Make your changes
-4. Test your changes
-5. Open a Pull Request
-
-For larger changes, opening an issue first is recommended.
-
----
-
-## 📄 License
-
-This project is currently provided for educational purposes.
-
-A formal open-source license can be added as the project matures.
-
----
+For personal labs, CTFs, local testing and systems you are authorised to assess. Never use it for unauthorised access. The author is not responsible for misuse.
 
 ## 👨‍💻 Author
 
-**Rumet Şaşmaz**
-
-GitHub:
-https://github.com/rumetsasmaz
-
----
-
-⭐ If you find this project useful for learning cybersecurity or Python, consider giving it a star.
+**Rumet Şaşmaz**: https://github.com/rumetsasmaz
