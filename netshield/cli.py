@@ -12,7 +12,7 @@ import json
 import socket
 from datetime import datetime
 
-from netshield import disclosure, mailsec, scanning, sniffing, theme, webaudit, whois
+from netshield import disclosure, mailsec, report, scanning, sniffing, theme, webaudit, whois
 from netshield.modules.analyzer import format_stream_list
 from netshield.modules.dnstools import DEFAULT_TYPES, lookup_lines
 from netshield.modules.hashing import ALGORITHMS, hash_text
@@ -106,6 +106,15 @@ def build_parser():
     disclose.add_argument("domain")
     disclose.add_argument("-t", "--timeout", type=float, default=10.0)
     disclose.add_argument("--format", choices=("table", "json"), default="table")
+
+    rep = sub.add_parser("report", help="passive assessment of a domain as a Markdown/JSON report")
+    rep.add_argument("domain")
+    rep.add_argument("--checks", default=",".join(report.CHECKS),
+                     help=f"comma-separated subset of {','.join(report.CHECKS)}")
+    rep.add_argument("--format", choices=("md", "json"), default="md")
+    rep.add_argument("-o", "--output", help="write the report to this file")
+    rep.add_argument("-t", "--timeout", type=float, default=10.0)
+    _add_server_option(rep)
 
     ports = sub.add_parser("ports", help="look up a port number or service name")
     ports.add_argument("query")
@@ -322,6 +331,22 @@ def cmd_whois(args):
     return _output(_status_lines(whois.report_lines(info)))
 
 
+def cmd_report(args):
+    checks = [c.strip().lower() for c in args.checks.split(",") if c.strip()]
+    unknown = [c for c in checks if c not in report.CHECKS]
+    if unknown or not checks:
+        raise ValueError(f"unknown check(s) {', '.join(unknown) or '(none given)'}; "
+                         f"choose from {', '.join(report.CHECKS)}")
+    result = report.assess(args.domain, checks=checks, timeout=args.timeout,
+                           dns_server=_check_server(args.server))
+    text = report.to_json(result) if args.format == "json" else report.to_markdown(result)
+    code = _output(_plain(text), args.output)
+    if args.output:
+        counts = result.counts()
+        say("info", "    " + ", ".join(f"{counts[s]} {s}" for s in report.SEVERITIES))
+    return code
+
+
 def cmd_disclosure(args):
     result = disclosure.find_security_txt(args.domain, timeout=args.timeout)
     if args.format == "json":
@@ -398,6 +423,7 @@ def cmd_passwd(args):
 COMMANDS = {"scan": cmd_scan, "discover": cmd_discover, "sniff": cmd_sniff,
             "analyze": cmd_analyze, "tls": cmd_tls, "headers": cmd_headers,
             "dns": cmd_dns, "mail": cmd_mail, "whois": cmd_whois, "disclosure": cmd_disclosure,
+            "report": cmd_report,
             "ports": cmd_ports, "hash": cmd_hash, "passwd": cmd_passwd}
 
 
