@@ -157,6 +157,37 @@ def test_spf(txt, status):
     assert ms.analyze_spf(txt).status == status
 
 
+@pytest.mark.parametrize("policy, status, text", [
+    ("reject", PASS, "backed by DMARC reject"),
+    ("quarantine", PASS, "backed by DMARC quarantine"),
+    ("none", WARN, "only marked, not blocked"),       # regression: was PASS with "fine with DMARC"
+    (None, WARN, "only marked, not blocked"),
+])
+def test_softfail_depends_on_dmarc(policy, status, text):
+    finding = ms.contextualize_softfail(ms.analyze_spf(["v=spf1 include:x.test ~all"]), policy)
+    assert finding.status == status and text in finding.detail
+
+
+def test_hardfail_and_failures_are_not_changed_by_context():
+    hard = ms.analyze_spf(["v=spf1 -all"])
+    assert ms.contextualize_softfail(hard, None) is hard
+    broken = ms.analyze_spf(["v=spf1 +all"])
+    assert ms.contextualize_softfail(broken, "reject") is broken
+
+
+def test_softfail_with_monitoring_only_dmarc_is_graded_down(monkeypatch):
+    """The real-world case: ~all together with DMARC p=none."""
+    monkeypatch.setattr(dc, "query", fake_resolver({
+        ("shop.test", "TXT"): ["v=spf1 include:_spf.host.test ~all"],
+        ("_dmarc.shop.test", "TXT"): ["v=DMARC1; p=none"],
+        ("shop.test", "MX"): ["10 mx.host.test"],
+    }))
+    report = ms.audit_domain("shop.test", check_dkim=False)
+    statuses = {f.name: f.status for f in report.findings}
+    assert statuses["SPF"] == WARN and statuses["DMARC"] == WARN
+    assert report.score == 50 and report.grade == "D"
+
+
 def test_spf_lookup_limit():
     record = "v=spf1 " + " ".join(f"include:s{i}.test" for i in range(11)) + " -all"
     finding = ms.analyze_spf([record])

@@ -86,8 +86,20 @@ def analyze_spf(txt):
         status = WARN
     detail = record if not issues else "; ".join(issues) + f" ({record})"
     if status == PASS and qualifier == "~":
-        detail = f"softfail (~all), fine together with an enforcing DMARC policy: {record}"
+        detail = f"softfail (~all), only safe with an enforcing DMARC policy: {record}"
     return Finding("SPF", status, detail, 35, "" if status == PASS else fix)
+
+
+def contextualize_softfail(spf_finding, policy):
+    """~all only marks spoofed mail; it is protection only if DMARC enforces (quarantine/reject)."""
+    if spf_finding.status != PASS or not spf_finding.detail.startswith("softfail"):
+        return spf_finding
+    record = spf_finding.detail.split(": ", 1)[-1]
+    if policy in ("quarantine", "reject"):
+        return Finding("SPF", PASS, f"softfail (~all), backed by DMARC {policy}: {record}", 35)
+    return Finding("SPF", WARN, f"softfail (~all) without an enforcing DMARC policy, so spoofed mail is "
+                                f"only marked, not blocked: {record}", 35,
+                   "Use -all, or move DMARC to p=quarantine / p=reject.")
 
 
 # --- DMARC -----------------------------------------------------------------
@@ -270,7 +282,8 @@ def audit_domain(domain, server=None, timeout=3.0, check_dkim=True):
                 revoked.append(selector)
 
     policy = effective_policy(report.dmarc, report.dmarc_inherited_from)
-    report.findings = [mitigate_missing_spf(analyze_spf(base.values("TXT")), policy),
+    spf = contextualize_softfail(analyze_spf(base.values("TXT")), policy)
+    report.findings = [mitigate_missing_spf(spf, policy),
                        analyze_dmarc(report.dmarc, report.dmarc_inherited_from),
                        analyze_dkim(report.dkim_selectors, revoked, wildcard), analyze_mx(report.mx),
                        analyze_caa(report.caa)]
