@@ -218,3 +218,6 @@ __marimo__/
 .streamlit/secrets.toml
 
 test.py
+# Packet captures (contain real network traffic)
+*.pcap
+*.pcapng
