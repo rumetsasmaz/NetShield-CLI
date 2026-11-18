@@ -54,11 +54,11 @@ def scan_port_and_banner(target, start_port, end_port):
                         print(f"   └── {YELLOW}[BANNER]: {banner_summary}{RESET}")
                     else:
                         print(f"   └── {RED}[BANNER]: No response / Silent service.{RESET}")
-                except:
+                except (socket.timeout, OSError):
                     print(f"   └── {YELLOW}[BANNER]: Failed to retrieve banner payload.{RESET}")
 
-        except Exception:
-            pass
+        except OSError as error:
+            print(f"{RED}[!] Port {port}: connection error ({error}){RESET}")
         finally:
             s.close()
 

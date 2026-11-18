@@ -1,5 +1,5 @@
 from port_scanner import run_scanner_ui
-import random
+import secrets
 import socket
 import hashlib
 from colorama import Fore, Style, init
@@ -19,7 +19,7 @@ YELLOW = Fore.YELLOW
 RESET = Style.RESET_ALL
 
 # ASCII Banner
-BANNER = f"""{CYAN}
+BANNER = rf"""{CYAN}
  _   _  _____ _____ _____ _   _ _____ _____ _     _____    _____ _     _____ 
 | \ | ||  ___|_   _/  ___| | | |_   _|  ___| |   |  _  \  /  __ \ |   |_   _|
 |  \| || |__   | | \ `--.| |_| | | | | |__ | |   | | | |  | /  \/ |     | |  
@@ -37,7 +37,7 @@ def generate_password():
     password = ""
     all_chars = upper_case + lower_case + digits + symbols
     for x in range(0, 12):
-        password += random.choice(all_chars)
+        password += secrets.choice(all_chars)
     print(f"\n{GREEN}[+] Generated Password: {password}{RESET}\n")
 
 def check_ports():
@@ -65,7 +65,7 @@ def check_password_strength():
     score = 0
     feedback = []
 
-    if len(password) >= 9:
+    if len(password) >= 8:
         score += 1
     else:
         feedback.append(f"{RED}Password Should Be Minimum 8 Character")
@@ -85,7 +85,7 @@ def check_password_strength():
     else:
         feedback.append(f"{RED}Add Digit")
 
-    if any(char.isalnum() for char in password):
+    if any(not char.isalnum() for char in password):
         score += 1
     else:
         feedback.append(f"{RED}Add Symbol")
