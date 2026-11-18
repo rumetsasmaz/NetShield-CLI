@@ -12,7 +12,8 @@ A modular, Python-based cybersecurity command-line toolkit for learning, experim
 |---|---|
 | **Port & Service Scanner** | Threaded TCP scan. Reports `open` / `closed` / `filtered`, grabs banners (passive first, then an HTTP probe) and identifies services and versions. Port specs: `22,80`, `1-1000`, `top`, `all`. Optional JSON report. |
 | **Host Discovery** | TCP ping of a network (CIDR, max `/24`). |
-| **Packet Sniffer** | Wireshark-style capture and decoding of IPv4 TCP/UDP/ICMP with protocol/port/host filters. Needs Administrator/root. |
+| **Packet Sniffer** | Wireshark-style live capture and decoding of IPv4 TCP/UDP/ICMP (DNS queries/answers included). tcpdump-like filters (`tcp and (port 80 or port 443) and not host 10.0.0.1`), duplicate-packet removal, `.pcap` export. Needs Administrator/root. |
+| **Capture Analyzer** | Reads classic `.pcap` files (including Wireshark captures) with no special privileges: filter, list, protocol/top-talker/conversation statistics. |
 | **Port Database** | Look up a port number or service name, with risk notes. |
 | **Password Checker / Generator** | Strength scoring with hints; `secrets`-based generator. |
 | **Hash Text / Hash Cracker** | MD5, SHA-1, SHA-256, SHA-512; dictionary attack with automatic algorithm detection. |
@@ -27,16 +28,43 @@ pip install -r requirements.txt
 python main.py
 ```
 
+## 💻 Command line
+
+`python main.py` opens the interactive menu; with arguments it behaves like a normal CLI:
+
+```bash
+python main.py scan 127.0.0.1 -p 1-1000 --format json -o report.json
+python main.py scan scanme.example -p top --yes        # --yes = I am authorised to scan this target
+python main.py discover 192.168.1.0/24
+python main.py sniff -f "tcp and port 80" -c 50 -w capture.pcap   # needs Administrator/root
+python main.py analyze capture.pcap -f dns                         # no privileges needed
+python main.py analyze capture.pcap --stats
+python main.py ports ssh | hash "text" | passwd --generate 20
+```
+
+Exit codes: `0` success, `1` error or refused, `2` bad usage.
+
+## 🧪 Tests
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+Tests use hand-built packets and local listeners only; nothing touches the internet.
+
 ## 🧱 Architecture
 
 ```
-main.py                  menu built automatically from the module registry
+main.py                  no args -> menu, args -> CLI
 netshield/
+  cli.py / menu.py       argparse commands / interactive menu
   base.py                BaseModule (name, description, run)
   theme.py / config.py   colours, safe output, settings
   scanning.py            scan core (returns data, never prints)
-  sniffing.py            packet parsers (pure) + raw-socket capture
+  sniffing.py            parsers, DNS, filters, stats, pcap I/O, raw-socket capture
   modules/               one BaseModule subclass per tool
+tests/                   pytest suite
 ```
 
 Adding a tool = write a `BaseModule` subclass in `netshield/modules/` and list it in `netshield/modules/__init__.py`.
@@ -51,10 +79,11 @@ Adding a tool = write a `BaseModule` subclass in `netshield/modules/` and list i
 ## 🗺️ Roadmap
 
 - [x] Modular architecture, themes, threaded scanner, packet sniffer
-- [ ] `argparse` commands (`netshield scan 10.0.0.5 -p 1-1000`)
-- [ ] More service probes and signatures, UDP scan
-- [ ] Export sniffer captures (pcap)
-- [ ] Automated tests (`pytest`), logging
+- [x] `argparse` commands, pcap export/import, DNS decoding, capture filters, statistics, tests
+- [ ] UDP scan (DNS, NTP, SNMP probes)
+- [ ] More service probes and signatures, TLS certificate info
+- [ ] Follow TCP stream, HTTP request/response view, `.pcapng`
+- [ ] Logging, more security utilities (HTTP header audit, DNS tools)
 
 ## 🔒 Ethical use
 
