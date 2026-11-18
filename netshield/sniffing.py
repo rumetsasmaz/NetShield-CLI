@@ -394,24 +394,26 @@ class Deduplicator:
     Some Windows setups deliver an outgoing packet twice to a raw socket. The
     IP identification field plus TCP sequence number tell a duplicate apart
     from a genuine retransmission (a retransmission gets a new IP id).
-    Packets with IP id 0 are never dropped.
+    Some stacks (e.g. Windows SYN packets) leave the IP id at 0; for those the
+    window is much tighter (`zero_id_window`), because a real TCP retransmission
+    is never sent within a few milliseconds of the original.
     """
 
-    def __init__(self, window=0.05):
+    def __init__(self, window=0.05, zero_id_window=0.005):
         self.window = window
+        self.zero_id_window = zero_id_window
         self._seen = {}
 
     def is_duplicate(self, packet, now=None):
-        if packet.ident == 0:
-            return False
         now = packet.timestamp if now is None else now
+        window = self.window if packet.ident else self.zero_id_window
         key = (packet.src, packet.dst, packet.protocol, packet.ident, packet.seq,
                packet.src_port, packet.dst_port, packet.length, packet.flags)
         previous = self._seen.get(key)
         self._seen[key] = now
         if len(self._seen) > 2000:
             self._seen = {k: t for k, t in self._seen.items() if now - t <= self.window}
-        return previous is not None and now - previous <= self.window
+        return previous is not None and now - previous <= window
 
 
 # --- pcap files ------------------------------------------------------------

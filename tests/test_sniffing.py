@@ -118,11 +118,13 @@ def test_deduplicator():
     assert not dedupe.is_duplicate(sn.parse_packet(http_get(), timestamp=2.0))  # outside window
 
 
-def test_deduplicator_never_drops_ident_zero():
-    dedupe = sn.Deduplicator()
-    p = sn.parse_packet(ipv4(6, tcp(1, 2, 0x10), ident=0), timestamp=1.0)
-    assert not dedupe.is_duplicate(p)
-    assert not dedupe.is_duplicate(p)
+def test_deduplicator_uses_tight_window_for_ident_zero():
+    dedupe = sn.Deduplicator(window=0.05, zero_id_window=0.005)
+    syn = ipv4(6, tcp(1, 2, 0x02), ident=0)
+    assert not dedupe.is_duplicate(sn.parse_packet(syn, timestamp=1.0000))
+    assert dedupe.is_duplicate(sn.parse_packet(syn, timestamp=1.0002))     # same SYN, microseconds apart
+    assert not dedupe.is_duplicate(sn.parse_packet(syn, timestamp=2.0))    # SYN retransmit ~1 s later is kept
+    assert not dedupe.is_duplicate(sn.parse_packet(syn, timestamp=2.020))  # beyond the tight window
 
 
 # --- pcap ---------------------------------------------------------------
